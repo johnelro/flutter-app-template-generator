@@ -145,7 +145,7 @@ GoRoute(
 
 ## Architecture
 
-``
+```
 lib/
 ├── main.dart                          # App entry point, MultiProvider, GoRouter
 ├── core/
@@ -174,7 +174,7 @@ lib/
 │       └── [feature]_screen.dart
 ├── theme/app_theme.dart               # All colors, text styles, ThemeData
 └── utils/responsive_helper.dart       # Device detection + responsive sizing
-``
+```
 
 ### Core Principles
 
