@@ -1,4 +1,4 @@
-# Flutter Clean Architecture Bootstrap
+# Flutter Clean Architecture Generator
 
 A single shell script that scaffolds a production-ready Flutter project in under two minutes — fully wired, lint-clean, and ready to build features immediately.
 
@@ -27,7 +27,7 @@ A second script, `new_feature.sh`, is generated inside every project and scaffol
 ## Requirements
 
 | Tool | Minimum |
-|------|---------|
+| ---- | ------- |
 | Flutter SDK | 3.19+ (stable channel) |
 | Dart | 3.3+ |
 | Bash | 3.2+ (macOS default works) |
@@ -59,7 +59,6 @@ chmod +x create_flutter_app.sh
 You will be prompted for:
 
 | Prompt | Example |
-|--------|---------|
 | Project name (snake_case) | `my_app` |
 | Organization | `com.yourcompany` |
 | Base API URL | `https://api.yourcompany.com` |
@@ -98,14 +97,14 @@ Every generated project includes `new_feature.sh`. Run it from inside the projec
 
 This creates:
 
-```
+``
 lib/screens/products/
 ├── models/           ← empty, ready for products_model.dart
 ├── providers/        ← products_provider.dart (full ChangeNotifier boilerplate)
 ├── services/         ← products_api_service.dart (fetch + create stubs)
 ├── widgets/          ← empty, ready for your widgets
 └── products_screen.dart  ← placeholder screen ("Start this new feature.")
-```
+``
 
 Then follow the two printed next steps:
 
@@ -125,7 +124,7 @@ GoRoute(
 ## Technology Stack
 
 | Package | Version | Purpose |
-|---------|---------|---------|
+| --------- | --------- | --------- |
 | `provider` | ^6.1.5+1 | State management |
 | `go_router` | ^17.2.3 | Navigation |
 | `dio` | ^5.9.0 | HTTP client |
@@ -146,7 +145,7 @@ GoRoute(
 
 ## Architecture
 
-```
+``
 lib/
 ├── main.dart                          # App entry point, MultiProvider, GoRouter
 ├── core/
@@ -175,7 +174,7 @@ lib/
 │       └── [feature]_screen.dart
 ├── theme/app_theme.dart               # All colors, text styles, ThemeData
 └── utils/responsive_helper.dart       # Device detection + responsive sizing
-```
+``
 
 ### Core Principles
 
