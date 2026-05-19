@@ -39,22 +39,22 @@ A second script, `new_feature.sh`, is generated inside every project and scaffol
 
 ### 1. Clone or download
 
-```bash
-git clone https://github.com/your-username/flutter-clean-arch-bootstrap.git
-cd flutter-clean-arch-bootstrap
-```
+````bash
+git https://github.com/johnelro/flutter-app-complete-generator.git
+cd (to folder where you clone the repo)
+````
 
 ### 2. Make it executable
 
-```bash
+````bash
 chmod +x create_flutter_app.sh
-```
+````
 
 ### 3. Run it
 
-```bash
+````bash
 ./create_flutter_app.sh
-```
+````
 
 You will be prompted for:
 
@@ -70,20 +70,20 @@ The script then creates `my_app/`, installs dependencies, converts all imports, 
 
 Two values need your real credentials before you run the app:
 
-```dart
+````dart
 // lib/core/global_variables/global_variables.dart
 const String apiKey = 'your-api-key';   // ← replace
 
 // lib/screens/login/services/auth_api_service.dart
 // Update the endpoint path and response shape to match your API
-```
+````
 
 ### 5. Run
 
-```bash
+````bash
 cd my_app
 flutter run
-```
+````
 
 ---
 
@@ -91,9 +91,9 @@ flutter run
 
 Every generated project includes `new_feature.sh`. Run it from inside the project root:
 
-```bash
+````bash
 ./new_feature.sh products
-```
+````
 
 This creates:
 
@@ -108,7 +108,7 @@ lib/screens/products/
 
 Then follow the two printed next steps:
 
-```dart
+````dart
 // 1. Register provider in lib/main.dart
 ChangeNotifierProvider(create: (_) => ProductsProvider()),
 
@@ -117,7 +117,7 @@ GoRoute(
   path: '/products',
   builder: (_, __) => const ProductsScreen(),
 ),
-```
+````
 
 ---
 
@@ -189,7 +189,7 @@ lib/
 
 Every screen reads device type and sizes from `ResponsiveHelper`:
 
-```dart
+````dart
 @override
 Widget build(BuildContext context) {
   final responsive = ResponsiveHelper(context);
@@ -205,7 +205,7 @@ Widget build(BuildContext context) {
     ),
   );
 }
-```
+````
 
 Device detection: `isMobile` · `isTablet` · `isIPad` · `isDesktop` · `isAnyTablet`
 
@@ -215,20 +215,20 @@ Text style getters: `headlineLarge` · `headlineMedium` · `titleLarge` · `titl
 
 For custom dimensions, add a private `_get*()` method with 4 branches:
 
-```dart
+````dart
 double _getCardPadding(ResponsiveHelper r) {
   if (r.isMobile) return 12.0;
   if (r.isTablet) return 14.0;
   if (r.isIPad) return 15.0;
   return 16.0;   // desktop
 }
-```
+````
 
 ### Skeleton Loading (skeletonizer)
 
 Use `Skeletonizer` on first load (`!provider.hasInitialized`). Pass real card widgets fed fake model instances — never build placeholder boxes:
 
-```dart
+````dart
 Widget _buildSkeletonLoader(ResponsiveHelper responsive) {
   final fakeItems = List.generate(
     5,
@@ -242,15 +242,15 @@ Widget _buildSkeletonLoader(ResponsiveHelper responsive) {
     ),
   );
 }
-```
+````
 
 Use it:
 
-```dart
+````dart
 !provider.hasInitialized
     ? _buildSkeletonLoader(responsive)
     : ProductList(responsive: responsive),
-```
+````
 
 ---
 
