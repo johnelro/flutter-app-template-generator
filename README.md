@@ -97,14 +97,14 @@ Every generated project includes `new_feature.sh`. Run it from inside the projec
 
 This creates:
 
-``
+```
 lib/screens/products/
 ├── models/           ← empty, ready for products_model.dart
 ├── providers/        ← products_provider.dart (full ChangeNotifier boilerplate)
 ├── services/         ← products_api_service.dart (fetch + create stubs)
 ├── widgets/          ← empty, ready for your widgets
 └── products_screen.dart  ← placeholder screen ("Start this new feature.")
-``
+```
 
 Then follow the two printed next steps:
 
