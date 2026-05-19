@@ -14,7 +14,7 @@ Running `create_flutter_app.sh` interactively asks four questions, then generate
 - `ResponsiveHelper` — full responsive API for mobile / tablet / iPad / desktop
 - `GoRouter` with `AuthRouteNotifier` and auth-aware redirect
 - `AuthMainProvider` with `checkAuthStatus` / `signIn` / `signOut`
-- Splash → Login → Home flow that runs immediately
+- `Splash` → Login → Home flow that runs immediately
 - `main.dart` fully wired with `MultiProvider`
 - `pubspec.yaml` with all dependencies at latest stable versions
 - All imports converted to `package:` URIs automatically
