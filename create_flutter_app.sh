@@ -761,10 +761,10 @@ class ResponsiveHelper {
     return 700.0;
   }
 
-  double get buttonHeight {
-    if (isMobile) return hp(6);
-    if (isTablet) return hp(7);
-    return hp(8);
+ double get buttonHeight {
+    if (isMobile) return 48.0;
+    if (isTablet) return 52.0;
+    return 56.0;
   }
 
   double get formElementHeight {
@@ -954,6 +954,49 @@ class AuthMainProvider extends ChangeNotifier {
     }
   }
 
+  // ── Register ───────────────────────────────────────────────
+  Future<bool> register({required String name, required String email, required String password}) async {
+    _setStatus(AuthStatus.loading);
+    _clearError();
+    try {
+      if (kDebugMode) debugPrint('[auth_main_provider] register: $email');
+      final result = await authApiService.register(name: name, email: email, password: password);
+
+      await StorageService.saveToken(result['token'] as String);
+      await StorageService.saveUser(result['user'] as Map<String, dynamic>);
+      await StorageService.saveEmail(email);
+
+      _userEmail = email;
+      _userRole = (result['user'] as Map<String, dynamic>)['role'] as String? ?? '';
+      _setStatus(AuthStatus.authenticated);
+
+      if (kDebugMode) {
+        debugPrint('[auth_main_provider] register: success, role=$_userRole');
+      }
+      return true;
+    } on AuthException catch (e) {
+      _setError(e.message);
+      _setStatus(AuthStatus.unauthenticated);
+      if (kDebugMode) debugPrint('[auth_main_provider] register auth error: ${e.message}');
+      return false;
+    } on NetworkException catch (e) {
+      _setError('Network error. Please check your connection.');
+      _setStatus(AuthStatus.unauthenticated);
+      if (kDebugMode) debugPrint('[auth_main_provider] register network error: ${e.message}');
+      return false;
+    } on ApiException catch (e) {
+      _setError(e.message);
+      _setStatus(AuthStatus.unauthenticated);
+      if (kDebugMode) debugPrint('[auth_main_provider] register api error: ${e.message}');
+      return false;
+    } catch (e) {
+      _setError('Unexpected error. Please try again.');
+      _setStatus(AuthStatus.unauthenticated);
+      if (kDebugMode) debugPrint('[auth_main_provider] register unexpected error: $e');
+      return false;
+    }
+  }
+
   // ── Sign out ──────────────────────────────────────────────
   Future<void> signOut() async {
     if (kDebugMode) debugPrint('[auth_main_provider] signOut');
@@ -1014,6 +1057,30 @@ class AuthApiService {
     } catch (e) {
       if (kDebugMode) debugPrint('[auth_api_service] login unexpected error: $e');
       throw ApiException('[auth_api_service] Unexpected error during login');
+    }
+  }
+
+  Future<Map<String, dynamic>> register({
+    required String name,
+    required String email,
+    required String password,
+  }) async {
+    try {
+      if (kDebugMode) debugPrint('[auth_api_service] register: $email');
+
+      final response = await apiClient.post(
+        '/auth/register',
+        data: {'name': name, 'email': email, 'password': password},
+      );
+
+      final data = response.data as Map<String, dynamic>;
+      if (kDebugMode) debugPrint('[auth_api_service] register: success');
+      return data;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[auth_api_service] register unexpected error: $e');
+      throw ApiException('[auth_api_service] Unexpected error during registration');
     }
   }
 
@@ -1228,7 +1295,14 @@ import 'package:${PROJECT_NAME}/theme/app_theme.dart';
 import 'package:${PROJECT_NAME}/utils/responsive_helper.dart';
 
 class LoginHeader extends StatelessWidget {
-  const LoginHeader({super.key});
+  final String title;
+  final String subtitle;
+
+  const LoginHeader({
+    super.key,
+    this.title = 'Welcome back',
+    this.subtitle = 'Sign in to continue',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1236,11 +1310,33 @@ class LoginHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(Icons.bolt_rounded, size: responsive.sp(48), color: AppTheme.primary),
-        SizedBox(height: responsive.spacingS),
-        Text('Welcome back', style: AppTheme.headlineMedium),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            Icons.bolt_rounded,
+            size: responsive.sp(40),
+            color: AppTheme.primary,
+          ),
+        ),
+        SizedBox(height: responsive.spacingM),
+        Text(
+          title,
+          style: AppTheme.headlineMedium.copyWith(
+            letterSpacing: -0.5,
+            height: 1.1,
+          ),
+        ),
         SizedBox(height: responsive.spacingXS),
-        Text('Sign in to continue', style: AppTheme.bodyMedium),
+        Text(
+          subtitle,
+          style: AppTheme.bodyMedium.copyWith(
+            color: AppTheme.textSecondary,
+          ),
+        ),
       ],
     );
   }
@@ -1293,8 +1389,10 @@ class _LoginFormState extends State<LoginForm> {
   Widget build(BuildContext context) {
     final responsive = ResponsiveHelper(context);
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
+          width: double.infinity,
           height: responsive.formElementHeight,
           child: TextFormField(
             controller: _emailController,
@@ -1304,11 +1402,19 @@ class _LoginFormState extends State<LoginForm> {
               labelText: 'Email',
               contentPadding: responsive.inputContentPadding,
               prefixIcon: const Icon(Icons.email_outlined),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
             ),
           ),
         ),
         SizedBox(height: responsive.spacingM),
         SizedBox(
+          width: double.infinity,
           height: responsive.formElementHeight,
           child: TextFormField(
             controller: _passwordController,
@@ -1324,6 +1430,13 @@ class _LoginFormState extends State<LoginForm> {
                 ),
                 onPressed: () =>
                     setState(() => _obscurePassword = !_obscurePassword),
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
               ),
             ),
           ),
@@ -1419,82 +1532,474 @@ class LoginError extends StatelessWidget {
 }
 LOGINERROR
 
-# login_screen.dart
-cat > lib/screens/login/login_screen.dart << LOGINSCREEN
+# login/widgets/auth_transition.dart
+cat > lib/screens/login/widgets/auth_transition.dart << AUTHTRANSITION
+import 'package:flutter/material.dart';
+
+class AuthTransition extends StatelessWidget {
+  final AnimationController controller;
+  final bool isLoginMode;
+  final Widget child;
+
+  const AuthTransition({
+    super.key,
+    required this.controller,
+    required this.isLoginMode,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final curve = CurvedAnimation(
+          parent: controller,
+          curve: Curves.easeInOutCubic,
+        );
+
+        return FadeTransition(
+          opacity: isLoginMode
+              ? Tween<double>(begin: 1.0, end: 0.0).animate(curve)
+              : Tween<double>(begin: 0.0, end: 1.0).animate(curve),
+          child: SlideTransition(
+            position: isLoginMode
+                ? Tween<Offset>(
+                    begin: Offset.zero,
+                    end: const Offset(-0.02, 0),
+                  ).animate(curve)
+                : Tween<Offset>(
+                    begin: const Offset(0.02, 0),
+                    end: Offset.zero,
+                  ).animate(curve),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+}
+AUTHTRANSITION
+
+# login/widgets/register_form.dart
+cat > lib/screens/login/widgets/register_form.dart << REGISTERFORM
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+import 'package:${PROJECT_NAME}/screens/login/providers/auth_main_provider.dart';
+import 'package:${PROJECT_NAME}/theme/app_theme.dart';
+import 'package:${PROJECT_NAME}/utils/responsive_helper.dart';
+
+class RegisterForm extends StatefulWidget {
+  const RegisterForm({super.key});
+
+  @override
+  State<RegisterForm> createState() => _RegisterFormState();
+}
+
+class _RegisterFormState extends State<RegisterForm> {
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  bool _obscurePassword = true;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onRegister() async {
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+    final confirmPassword = _confirmPasswordController.text.trim();
+
+    if (name.isEmpty || email.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill in all fields.')),
+      );
+      return;
+    }
+
+    if (password != confirmPassword) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Passwords do not match.')),
+      );
+      return;
+    }
+
+    final provider = context.read<AuthMainProvider>();
+    final success = await provider.register(name: name, email: email, password: password);
+    if (success && mounted) context.go('/home');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final responsive = ResponsiveHelper(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          width: double.infinity,
+          height: responsive.formElementHeight,
+          child: TextFormField(
+            controller: _nameController,
+            style: TextStyle(fontSize: responsive.sp(14)),
+            decoration: InputDecoration(
+              labelText: 'Full Name',
+              contentPadding: responsive.inputContentPadding,
+              prefixIcon: const Icon(Icons.person_outline),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
+            ),
+          ),
+        ),
+        SizedBox(height: responsive.spacingM),
+        SizedBox(
+          width: double.infinity,
+          height: responsive.formElementHeight,
+          child: TextFormField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            style: TextStyle(fontSize: responsive.sp(14)),
+            decoration: InputDecoration(
+              labelText: 'Email',
+              contentPadding: responsive.inputContentPadding,
+              prefixIcon: const Icon(Icons.email_outlined),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
+            ),
+          ),
+        ),
+        SizedBox(height: responsive.spacingM),
+        SizedBox(
+          width: double.infinity,
+          height: responsive.formElementHeight,
+          child: TextFormField(
+            controller: _passwordController,
+            obscureText: _obscurePassword,
+            style: TextStyle(fontSize: responsive.sp(14)),
+            decoration: InputDecoration(
+              labelText: 'Password',
+              contentPadding: responsive.inputContentPadding,
+              prefixIcon: const Icon(Icons.lock_outlined),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                ),
+                onPressed: () =>
+                    setState(() => _obscurePassword = !_obscurePassword),
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
+            ),
+          ),
+        ),
+        SizedBox(height: responsive.spacingM),
+        SizedBox(
+          width: double.infinity,
+          height: responsive.formElementHeight,
+          child: TextFormField(
+            controller: _confirmPasswordController,
+            obscureText: _obscurePassword,
+            style: TextStyle(fontSize: responsive.sp(14)),
+            decoration: InputDecoration(
+              labelText: 'Confirm Password',
+              contentPadding: responsive.inputContentPadding,
+              prefixIcon: const Icon(Icons.lock_reset_outlined),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
+            ),
+          ),
+        ),
+        SizedBox(height: responsive.spacingL),
+        _RegisterButton(onPressed: _onRegister),
+      ],
+    );
+  }
+}
+
+class _RegisterButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  const _RegisterButton({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final responsive = ResponsiveHelper(context);
+    return Consumer<AuthMainProvider>(
+      builder: (context, provider, _) {
+        return SizedBox(
+          width: double.infinity,
+          height: responsive.buttonHeight,
+          child: ElevatedButton(
+            onPressed: provider.isLoading ? null : onPressed,
+            child: provider.isLoading
+                ? SizedBox(
+                    height: responsive.sp(20),
+                    width: responsive.sp(20),
+                    child: const CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppTheme.textOnPrimary,
+                    ),
+                  )
+                : Text(
+                    'Create Account',
+                    style: TextStyle(fontSize: responsive.sp(16)),
+                  ),
+          ),
+        );
+      },
+    );
+  }
+}
+REGISTERFORM
+
+# login/widgets/login_branding_side.dart
+cat > lib/screens/login/widgets/login_branding_side.dart << BRANDINGSIDE
+import 'package:flutter/material.dart';
+import 'package:${PROJECT_NAME}/theme/app_theme.dart';
+import 'package:${PROJECT_NAME}/utils/responsive_helper.dart';
+
+class LoginBrandingSide extends StatelessWidget {
+  final bool isLoginMode;
+  const LoginBrandingSide({super.key, required this.isLoginMode});
+
+  @override
+  Widget build(BuildContext context) {
+    final responsive = ResponsiveHelper(context);
+    return Container(
+      color: AppTheme.primary,
+      width: double.infinity,
+      child: Padding(
+        padding: responsive.defaultPadding,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.bolt_rounded,
+                size: responsive.sp(80), color: Colors.white),
+            SizedBox(height: responsive.spacingL),
+            Text(
+              'You app name here',
+              style: AppTheme.headlineLarge.copyWith(color: Colors.white),
+            ),
+            SizedBox(height: responsive.spacingS),
+            Text(
+              isLoginMode
+                  ? 'The fastest way to manage your workflow.'
+                  : 'Join thousands of professionals today.',
+              style: AppTheme.bodyLarge
+                  .copyWith(color: Colors.white.withValues(alpha: 0.8)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+BRANDINGSIDE
+
+# login/widgets/login_auth_side.dart
+cat > lib/screens/login/widgets/login_auth_side.dart << AUTHSIDE
 import 'package:flutter/material.dart';
 import 'package:${PROJECT_NAME}/theme/app_theme.dart';
 import 'package:${PROJECT_NAME}/utils/responsive_helper.dart';
 import 'package:${PROJECT_NAME}/screens/login/widgets/login_header.dart';
 import 'package:${PROJECT_NAME}/screens/login/widgets/login_form.dart';
+import 'package:${PROJECT_NAME}/screens/login/widgets/register_form.dart';
 import 'package:${PROJECT_NAME}/screens/login/widgets/login_error.dart';
+import 'package:${PROJECT_NAME}/screens/login/widgets/auth_transition.dart';
 
-class LoginScreen extends StatelessWidget {
-  const LoginScreen({super.key});
+class LoginAuthSide extends StatelessWidget {
+  final bool isLoginMode;
+  final AnimationController animationController;
+  final VoidCallback onToggleMode;
+  final ResponsiveHelper responsive;
+
+  const LoginAuthSide({
+    super.key,
+    required this.isLoginMode,
+    required this.animationController,
+    required this.onToggleMode,
+    required this.responsive,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final responsive = ResponsiveHelper(context);
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return SingleChildScrollView(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: IntrinsicHeight(
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: _maxContentWidth(responsive),
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: _horizontalPadding(responsive),
-                          vertical: _verticalPadding(responsive),
-                        ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const LoginHeader(),
-                            SizedBox(height: responsive.spacingXL),
-                            const LoginForm(),
-                            SizedBox(height: responsive.spacingM),
-                            const LoginError(),
-                          ],
-                        ),
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppTheme.background,
+            AppTheme.grey100,
+          ],
+        ),
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: responsive.maxFormWidth,
+          ),
+          child: SingleChildScrollView(
+            padding: responsive.defaultPadding,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                LoginHeader(
+                  title: isLoginMode ? 'Welcome back' : 'Create account',
+                  subtitle: isLoginMode
+                      ? 'Sign in to continue'
+                      : 'Join us to get started',
+                ),
+                SizedBox(height: responsive.spacingXL),
+                AuthTransition(
+                  controller: animationController,
+                  isLoginMode: isLoginMode,
+                  child: isLoginMode
+                      ? const LoginForm(key: ValueKey('login'))
+                      : const RegisterForm(key: ValueKey('register')),
+                ),
+                SizedBox(height: responsive.spacingM),
+                Center(
+                  child: TextButton(
+                    onPressed: onToggleMode,
+                    child: Text(
+                      isLoginMode
+                          ? "Don't have an account? Register"
+                          : "Already have an account? Login",
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ),
+                SizedBox(height: responsive.spacingM),
+                const LoginError(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+AUTHSIDE
+
+# login_screen.dart
+cat > lib/screens/login/login_screen.dart << LOGINSCREEN
+import 'package:flutter/material.dart';
+import 'package:${PROJECT_NAME}/theme/app_theme.dart';
+import 'package:${PROJECT_NAME}/utils/responsive_helper.dart';
+import 'package:${PROJECT_NAME}/screens/login/widgets/login_branding_side.dart';
+import 'package:${PROJECT_NAME}/screens/login/widgets/login_auth_side.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
+  bool _isLoginMode = true;
+  late AnimationController _animationController;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  void _toggleMode() {
+    setState(() {
+      _isLoginMode = !_isLoginMode;
+    });
+    if (_isLoginMode) {
+      _animationController.reverse();
+    } else {
+      _animationController.forward();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final responsive = ResponsiveHelper(context);
+    // Split screen only makes sense when there is enough horizontal room.
+    // Below 900px, we use a single-column layout to avoid squishing either side.
+    final isWideScreen = responsive.screenWidth >= 900;
+
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      body: SafeArea(
+        child: Row(
+          children: [
+            if (isWideScreen)
+              Expanded(
+                flex: _getBrandingFlex(responsive),
+                child: LoginBrandingSide(isLoginMode: _isLoginMode),
               ),
-            );
-          },
+            Expanded(
+              flex: isWideScreen ? _getAuthFlex(responsive) : 10,
+              child: LoginAuthSide(
+                isLoginMode: _isLoginMode,
+                animationController: _animationController,
+                onToggleMode: _toggleMode,
+                responsive: responsive,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  double _horizontalPadding(ResponsiveHelper r) {
-    if (r.isMobile) return 20.0;
-    if (r.isTablet) return 24.0;
-    if (r.isIPad) return 28.0;
-    return 32.0;
+  int _getBrandingFlex(ResponsiveHelper r) {
+    if (r.screenWidth < 1200) return 5;
+    return 6;
   }
 
-  double _verticalPadding(ResponsiveHelper r) {
-    if (r.isMobile) return 16.0;
-    if (r.isTablet) return 20.0;
-    if (r.isIPad) return 24.0;
-    return 28.0;
-  }
-
-  double _maxContentWidth(ResponsiveHelper r) {
-    if (r.isMobile) return double.infinity;
-    if (r.isTablet) return 560.0;
-    if (r.isIPad) return 620.0;
-    return 680.0;
+  int _getAuthFlex(ResponsiveHelper r) {
+    if (r.screenWidth < 1200) return 5;
+    return 4;
   }
 }
 LOGINSCREEN
@@ -2164,8 +2669,10 @@ echo "  ✔ ApiClient (Dio singleton)"
 echo "  ✔ StorageService (secure + SharedPrefs)"
 echo "  ✔ AppTheme + ResponsiveHelper"
 echo "  ✔ GoRouter + AuthRouteNotifier"
-echo "  ✔ AuthMainProvider + signIn/signOut/checkAuthStatus"
-echo "  ✔ Splash → Login → Home flow"
+echo "  ✔ AuthMainProvider + signIn/register/signOut/checkAuthStatus"
+echo "  ✔ Splash → Login/Register → Home flow"
+echo "  ✔ LoginScreen: BrandingSide + AuthSide (split into own files)"
+echo "  ✔ AuthTransition animation + RegisterForm"
 echo "  ✔ main.dart wired up"
 echo ""
 echo -e "  ${BOLD}Next steps:${NC}"
