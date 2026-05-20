@@ -29,7 +29,7 @@ A second script, `new_feature.sh`, is generated inside every project and scaffol
 | Tool | Minimum |
 | ---- | ------- |
 | Flutter SDK | 3.44+ (stable channel) |
-| Dart | 3.11.6+ |
+| Dart | 3.11.5+ |
 | Bash | 3.2+ (macOS default works) |
 | Python 3 | Any version (for the import fixer) |
 

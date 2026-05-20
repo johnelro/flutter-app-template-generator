@@ -142,7 +142,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.11.6 <4.0.0'
+  sdk: '>=3.11.5 <4.0.0'
 
 dependencies:
   flutter:
