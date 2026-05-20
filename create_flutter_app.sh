@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================
-#  Flutter Clean Architecture — Project Bootstrap Script
+#  Flutter Clean Architecture Template Generator
 #  Based on project guidelines: clean arch, provider, GoRouter
 # ============================================================
 
@@ -17,7 +17,7 @@ print_header() {
   clear
   echo -e "\n${CYAN}${BOLD}"
   echo "╔══════════════════════════════════════════════════╗"
-  echo "║     Flutter Clean Architecture Bootstrap         ║"
+  echo "║       Flutter Clean Template Generator           ║"
   echo "║     Provider · GoRouter · Dio · Clean Arch       ║"
   echo "╚══════════════════════════════════════════════════╝"
   echo -e "${NC}"

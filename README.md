@@ -1,4 +1,4 @@
-# Flutter Clean Architecture Generator
+# Flutter Clean Template Generator
 
 A single shell script that scaffolds a production-ready Flutter project in under two minutes — fully wired, lint-clean, and ready to build features immediately.
 
