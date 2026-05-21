@@ -98,6 +98,99 @@ print_success "Flutter project created"
 
 cd "$PROJECT_NAME" || exit 1
 
+# ── Android permissions ───────────────────────────────────────
+print_step "Patching Android permissions"
+ANDROID_MANIFEST="android/app/src/main/AndroidManifest.xml"
+if [ -f "$ANDROID_MANIFEST" ]; then
+  python3 - "$ANDROID_MANIFEST" << 'PYEOF'
+import re, sys
+path = sys.argv[1]
+with open(path) as f: content = f.read()
+permissions = [
+    '<uses-permission android:name="android.permission.INTERNET"/>',
+    '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>',
+    '<uses-permission android:name="android.permission.CAMERA"/>',
+    '<uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>',
+    '<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>',
+]
+block = '\n'.join(f'    {p}' for p in permissions) + '\n'
+# Insert just before <application
+if '<uses-permission' not in content:
+    content = content.replace('<application', block + '<application', 1)
+    with open(path, 'w') as f: f.write(content)
+    print('  ✔ Permissions added to AndroidManifest.xml')
+else:
+    print('  ✔ Permissions already present in AndroidManifest.xml')
+PYEOF
+  print_success "Android manifest patched"
+else
+  print_warn "AndroidManifest.xml not found — skipping (expected for --empty create)"
+fi
+
+# ── iOS Info.plist usage descriptions ─────────────────────────
+print_step "Patching iOS Info.plist"
+IOS_PLIST="ios/Runner/Info.plist"
+if [ -f "$IOS_PLIST" ]; then
+  python3 - "$IOS_PLIST" << 'PYEOF'
+import sys, re
+path = sys.argv[1]
+with open(path) as f: content = f.read()
+entries = {
+    'NSCameraUsageDescription': 'This app needs camera access to take photos.',
+    'NSPhotoLibraryUsageDescription': 'This app needs photo library access to select images.',
+    'NSPhotoLibraryAddUsageDescription': 'This app needs permission to save photos to your library.',
+    'NSMicrophoneUsageDescription': 'This app needs microphone access for video recording.',
+}
+added = []
+for key, val in entries.items():
+    if key not in content:
+        inject = f'\t<key>{key}</key>\n\t<string>{val}</string>'
+        content = re.sub(r'(<dict>)', r'\1\n' + inject, content, count=1)
+        added.append(key)
+with open(path, 'w') as f: f.write(content)
+if added:
+    print('  ✔ Added: ' + ', '.join(added))
+else:
+    print('  ✔ All Info.plist keys already present')
+PYEOF
+  print_success "iOS Info.plist patched"
+else
+  print_warn "Info.plist not found — skipping"
+fi
+
+# ── macOS entitlements (network sandbox) ──────────────────────
+print_step "Patching macOS entitlements"
+for ENTITLEMENTS in \
+  "macos/Runner/DebugProfile.entitlements" \
+  "macos/Runner/Release.entitlements"; do
+  if [ -f "$ENTITLEMENTS" ]; then
+    python3 - "$ENTITLEMENTS" << 'PYEOF'
+import sys, re
+path = sys.argv[1]
+with open(path) as f: content = f.read()
+entries = {
+    'com.apple.security.network.client': '<true/>',
+    'com.apple.security.network.server': '<true/>',
+}
+added = []
+for key, val in entries.items():
+    if key not in content:
+        inject = f'\t<key>{key}</key>\n\t{val}'
+        content = re.sub(r'(<dict>)', r'\1\n' + inject, content, count=1)
+        added.append(key)
+with open(path, 'w') as f: f.write(content)
+label = path.split('/')[-1]
+if added:
+    print(f'  ✔ {label}: added {", ".join(added)}')
+else:
+    print(f'  ✔ {label}: network keys already present')
+PYEOF
+  else
+    print_warn "$ENTITLEMENTS not found — skipping (not a macOS project or not yet created)"
+  fi
+done
+print_success "macOS entitlements patched"
+
 # ── Folder structure ─────────────────────────────────────────
 print_step "Building folder structure"
 
@@ -125,6 +218,7 @@ dirs=(
   "lib/utils"
   "assets/images"
   "assets/image_icons"
+  "assets/fonts"
 )
 
 for d in "${dirs[@]}"; do
@@ -177,17 +271,39 @@ dependencies:
   # Loading states
   skeletonizer: ^1.4.3
 
+  # Serialization
+  json_annotation: ^4.9.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.14.4
 
+  # Code generation
+  build_runner: ^2.4.14
+  json_serializable: ^6.8.0
+  flutter_gen_runner: ^5.9.0
+
 flutter:
   uses-material-design: true
   assets:
     - assets/images/
     - assets/image_icons/
+
+# ── App icon generation (flutter_launcher_icons) ─────────────────
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_icon.png"
+  min_sdk_android: 21
+  web:
+    generate: false
+
+# ── Asset code generation (flutter_gen) ───────────────────────────
+flutter_gen:
+  output: lib/gen/
+  line_length: 120
 PUBSPEC
 
 print_success "pubspec.yaml written"
@@ -507,6 +623,122 @@ class ApiClient {
 APICLIENT
 
 print_success "Core service files written"
+
+# ── CONNECTIVITY SERVICE ──────────────────────────────────────
+print_step "Writing ConnectivityService + OfflineBanner"
+
+cat > lib/core/services/connectivity_service.dart << 'CONNECTIVITY'
+import 'dart:async';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
+
+class ConnectivityService extends ChangeNotifier {
+  static final ConnectivityService _instance = ConnectivityService._();
+  static ConnectivityService get instance => _instance;
+
+  ConnectivityService._();
+
+  bool _isOnline = true;
+  bool get isOnline => _isOnline;
+  bool get isOffline => !_isOnline;
+
+  StreamSubscription<List<ConnectivityResult>>? _subscription;
+
+  Future<void> init() async {
+    final results = await Connectivity().checkConnectivity();
+    _isOnline = _evaluate(results);
+    if (kDebugMode) debugPrint('[connectivity_service] initial: $_isOnline');
+
+    _subscription = Connectivity().onConnectivityChanged.listen((results) {
+      final online = _evaluate(results);
+      if (online != _isOnline) {
+        _isOnline = online;
+        if (kDebugMode) debugPrint('[connectivity_service] changed: $_isOnline');
+        notifyListeners();
+      }
+    });
+  }
+
+  bool _evaluate(List<ConnectivityResult> results) =>
+      results.any((r) => r != ConnectivityResult.none);
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+}
+CONNECTIVITY
+
+cat > lib/core/widgets/offline_banner.dart << 'OFFLINEBANNER'
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/connectivity_service.dart';
+
+/// Wraps [child] and shows a dismissible offline banner at the top
+/// whenever [ConnectivityService.isOffline] is true.
+///
+/// Usage in MaterialApp.router → builder:
+/// ```dart
+/// builder: (context, child) => OfflineBanner(child: child ?? const SizedBox()),
+/// ```
+class OfflineBanner extends StatelessWidget {
+  final Widget child;
+  const OfflineBanner({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<ConnectivityService>(
+      builder: (context, connectivity, _) {
+        return Column(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              height: connectivity.isOffline ? null : 0,
+              child: connectivity.isOffline
+                  ? Material(
+                      color: Colors.transparent,
+                      child: Container(
+                        width: double.infinity,
+                        color: const Color(0xFFD92D20),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 6,
+                          horizontal: 16,
+                        ),
+                        child: const SafeArea(
+                          bottom: false,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.wifi_off_rounded,
+                                  color: Colors.white, size: 16),
+                              SizedBox(width: 8),
+                              Text(
+                                'No internet connection',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            Expanded(child: child),
+          ],
+        );
+      },
+    );
+  }
+}
+OFFLINEBANNER
+
+print_success "ConnectivityService + OfflineBanner written"
 
 # ── THEME ─────────────────────────────────────────────────────
 print_step "Writing theme"
@@ -855,10 +1087,47 @@ print_success "responsive_helper.dart written"
 # ── AUTH PROVIDER ─────────────────────────────────────────────
 print_step "Writing auth & routing"
 
+# ── USER MODEL ────────────────────────────────────────────────
+cat > lib/screens/login/models/user_model.dart << 'USERMODEL'
+import 'package:json_annotation/json_annotation.dart';
+
+part 'user_model.g.dart';
+
+@JsonSerializable()
+class UserModel {
+  final String id;
+  final String name;
+  final String email;
+  final String role;
+  @JsonKey(name: 'createdAt')
+  final DateTime? createdAt;
+
+  const UserModel({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.role,
+    this.createdAt,
+  });
+
+  factory UserModel.fromJson(Map<String, dynamic> json) =>
+      _$UserModelFromJson(json);
+
+  Map<String, dynamic> toJson() => _$UserModelToJson(this);
+
+  // Convenience helpers used by AuthMainProvider
+  bool get isAdmin => role.toUpperCase() == 'ADMIN';
+  String get displayName => name.isNotEmpty ? name : email;
+}
+USERMODEL
+
+print_success "UserModel written (lib/screens/login/models/user_model.dart)"
+
 cat > lib/screens/login/providers/auth_main_provider.dart << 'AUTHPROVIDER'
 import 'package:flutter/foundation.dart';
 import '../../../core/services/api_exceptions.dart';
 import '../../../core/services/storage_service.dart';
+import '../models/user_model.dart';
 import '../services/auth_api_service.dart';
 
 enum AuthStatus { initial, loading, authenticated, unauthenticated }
@@ -871,19 +1140,17 @@ class AuthMainProvider extends ChangeNotifier {
   // --- State ---
   AuthStatus _status = AuthStatus.initial;
   String? _errorMessage;
-  String? _userEmail;
-  String _userRole = '';
+  UserModel? _currentUser;
 
   // --- Getters ---
   AuthStatus get status => _status;
   String? get errorMessage => _errorMessage;
-  String? get userEmail => _userEmail;
-  String get userRole => _userRole;
+  UserModel? get currentUser => _currentUser;
+  String? get userEmail => _currentUser?.email;
+  String get userRole => _currentUser?.role ?? '';
   bool get isLoading => _status == AuthStatus.loading;
   bool get isAuthenticated => _status == AuthStatus.authenticated;
-
-  // Role helpers — extend for your roles
-  bool get isAdmin => _userRole == 'ADMIN';
+  bool get isAdmin => _currentUser?.isAdmin ?? false;
 
   // ── Check stored session on startup ──────────────────────
   Future<void> checkAuthStatus() async {
@@ -893,11 +1160,12 @@ class AuthMainProvider extends ChangeNotifier {
       final token = await StorageService.getToken();
       if (token != null && token.isNotEmpty) {
         final userData = await StorageService.getUser();
-        _userEmail = userData?['email'] as String?;
-        _userRole = userData?['role'] as String? ?? '';
+        if (userData != null) {
+          _currentUser = UserModel.fromJson(userData);
+        }
         _setStatus(AuthStatus.authenticated);
         if (kDebugMode) {
-          debugPrint('[auth_main_provider] checkAuthStatus: authenticated');
+          debugPrint('[auth_main_provider] checkAuthStatus: authenticated as ${_currentUser?.email}');
         }
       } else {
         _setStatus(AuthStatus.unauthenticated);
@@ -920,15 +1188,15 @@ class AuthMainProvider extends ChangeNotifier {
       final result = await authApiService.login(email: email, password: password);
 
       await StorageService.saveToken(result['token'] as String);
-      await StorageService.saveUser(result['user'] as Map<String, dynamic>);
+
+      final userJson = result['user'] as Map<String, dynamic>;
+      await StorageService.saveUser(userJson);
+      _currentUser = UserModel.fromJson(userJson);
       await StorageService.saveEmail(email);
 
-      _userEmail = email;
-      _userRole = (result['user'] as Map<String, dynamic>)['role'] as String? ?? '';
       _setStatus(AuthStatus.authenticated);
-
       if (kDebugMode) {
-        debugPrint('[auth_main_provider] signIn: success, role=$_userRole');
+        debugPrint('[auth_main_provider] signIn: success, role=${_currentUser?.role}');
       }
       return true;
     } on AuthException catch (e) {
@@ -963,15 +1231,15 @@ class AuthMainProvider extends ChangeNotifier {
       final result = await authApiService.register(name: name, email: email, password: password);
 
       await StorageService.saveToken(result['token'] as String);
-      await StorageService.saveUser(result['user'] as Map<String, dynamic>);
+
+      final userJson = result['user'] as Map<String, dynamic>;
+      await StorageService.saveUser(userJson);
+      _currentUser = UserModel.fromJson(userJson);
       await StorageService.saveEmail(email);
 
-      _userEmail = email;
-      _userRole = (result['user'] as Map<String, dynamic>)['role'] as String? ?? '';
       _setStatus(AuthStatus.authenticated);
-
       if (kDebugMode) {
-        debugPrint('[auth_main_provider] register: success, role=$_userRole');
+        debugPrint('[auth_main_provider] register: success, role=${_currentUser?.role}');
       }
       return true;
     } on AuthException catch (e) {
@@ -1001,8 +1269,7 @@ class AuthMainProvider extends ChangeNotifier {
   Future<void> signOut() async {
     if (kDebugMode) debugPrint('[auth_main_provider] signOut');
     await StorageService.clear();
-    _userEmail = null;
-    _userRole = '';
+    _currentUser = null;
     _setStatus(AuthStatus.unauthenticated);
   }
 
@@ -2212,7 +2479,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'core/services/api_client.dart';
+import 'core/services/connectivity_service.dart';
 import 'core/services/storage_service.dart';
+import 'core/widgets/offline_banner.dart';
 import 'routes/app_routes.dart';
 import 'screens/login/providers/auth_main_provider.dart';
 import 'screens/login/services/auth_api_service.dart';
@@ -2223,6 +2492,7 @@ void main() async {
 
   await StorageService.init();
   ApiClient.initialize();
+  await ConnectivityService.instance.init();
 
   final apiClient = ApiClient.instance;
   final authApiService = AuthApiService(apiClient: apiClient);
@@ -2233,6 +2503,9 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
+        // Connectivity (singleton, pre-created)
+        ChangeNotifierProvider.value(value: ConnectivityService.instance),
+
         // Auth: pre-created, passed via .value()
         ChangeNotifierProvider.value(value: authProvider),
 
@@ -2268,6 +2541,9 @@ class _MyAppState extends State<MyApp> {
       title: '$APP_TITLE',
       theme: AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
+      // OfflineBanner wraps every screen automatically
+      builder: (context, child) =>
+          OfflineBanner(child: child ?? const SizedBox()),
     );
   }
 
@@ -2280,6 +2556,126 @@ class _MyAppState extends State<MyApp> {
 MAINDART
 
 print_success "main.dart written"
+
+# ── TEST SCAFFOLD ─────────────────────────────────────────────
+print_step "Writing test scaffold"
+
+mkdir -p test/core/services test/screens/login
+
+# test/core/services/storage_service_test.dart
+cat > test/core/services/storage_service_test.dart << 'STORAGETEST'
+import 'package:flutter_test/flutter_test.dart';
+
+// StorageService uses flutter_secure_storage + SharedPreferences which
+// require platform channels. In unit tests, stub out the platform layer
+// or use an integration test. These are placeholder tests showing the
+// pattern — replace with proper mocks (e.g. via mockito) as needed.
+
+void main() {
+  group('StorageService', () {
+    test('isLoggedIn returns false when no token is stored', () {
+      // TODO: mock FlutterSecureStorage and SharedPreferences,
+      // then verify StorageService.isLoggedIn() == false.
+      expect(true, isTrue); // placeholder
+    });
+
+    test('saveToken / getToken round-trips correctly', () {
+      // TODO: mock secure storage and assert token is retrievable.
+      expect(true, isTrue); // placeholder
+    });
+
+    test('clear removes token and user data', () {
+      // TODO: store then clear, assert getToken() == null.
+      expect(true, isTrue); // placeholder
+    });
+  });
+}
+STORAGETEST
+
+# test/core/services/api_exceptions_test.dart
+cat > test/core/services/api_exceptions_test.dart << 'APIEXTEST'
+import 'package:flutter_test/flutter_test.dart';
+
+// ApiException lives in lib/core/services/api_exceptions.dart.
+// Import it here once the package name is known (replace MY_APP).
+// import 'package:MY_APP/core/services/api_exceptions.dart';
+
+void main() {
+  group('ApiException', () {
+    test('toString returns message', () {
+      // final ex = ApiException('Something went wrong', 500);
+      // expect(ex.toString(), 'Something went wrong');
+      expect(true, isTrue); // placeholder
+    });
+
+    test('NetworkException is an ApiException', () {
+      // final ex = NetworkException('No internet');
+      // expect(ex, isA<ApiException>());
+      expect(true, isTrue); // placeholder
+    });
+
+    test('AuthException carries statusCode', () {
+      // final ex = AuthException('Unauthorized', 401);
+      // expect(ex.statusCode, 401);
+      expect(true, isTrue); // placeholder
+    });
+  });
+}
+APIEXTEST
+
+# test/screens/login/auth_main_provider_test.dart
+cat > test/screens/login/auth_main_provider_test.dart << 'AUTHTEST'
+import 'package:flutter_test/flutter_test.dart';
+
+// Replace MY_APP with the actual package name once generated.
+// import 'package:MY_APP/screens/login/providers/auth_main_provider.dart';
+// import 'package:MY_APP/screens/login/models/user_model.dart';
+// import 'package:MY_APP/screens/login/services/auth_api_service.dart';
+// import 'package:mockito/mockito.dart';
+
+// @GenerateMocks([AuthApiService])
+// import 'auth_main_provider_test.mocks.dart';
+
+void main() {
+  group('AuthMainProvider', () {
+    test('initial status is AuthStatus.initial', () {
+      // final mockService = MockAuthApiService();
+      // final provider = AuthMainProvider(authApiService: mockService);
+      // expect(provider.status, AuthStatus.initial);
+      // expect(provider.currentUser, isNull);
+      expect(true, isTrue); // placeholder
+    });
+
+    test('signIn sets currentUser and status to authenticated on success', () async {
+      // when(mockService.login(email: anyNamed('email'), password: anyNamed('password')))
+      //     .thenAnswer((_) async => {
+      //       'token': 'tok123',
+      //       'user': {'id': '1', 'name': 'Test', 'email': 'a@b.com', 'role': 'USER'},
+      //     });
+      // final success = await provider.signIn(email: 'a@b.com', password: 'pass');
+      // expect(success, isTrue);
+      // expect(provider.isAuthenticated, isTrue);
+      // expect(provider.currentUser, isA<UserModel>());
+      // expect(provider.currentUser!.email, 'a@b.com');
+      expect(true, isTrue); // placeholder
+    });
+
+    test('signOut clears currentUser and sets unauthenticated', () async {
+      // await provider.signOut();
+      // expect(provider.isAuthenticated, isFalse);
+      // expect(provider.currentUser, isNull);
+      expect(true, isTrue); // placeholder
+    });
+
+    test('isAdmin returns true when user role is ADMIN', () {
+      // Simulate a logged-in admin by injecting state via signIn mock.
+      expect(true, isTrue); // placeholder
+    });
+  });
+}
+AUTHTEST
+
+print_success "Test scaffold written (test/)"
 
 # ── FEATURE BOILERPLATE TEMPLATE ──────────────────────────────
 print_step "Writing new_feature generator script"
@@ -2312,10 +2708,16 @@ mkdir -p "$DEST/models" "$DEST/providers" "$DEST/services" "$DEST/widgets"
 
 # --- Model ---
 cat > "$DEST/models/${FEATURE}_model.dart" << EOF
+import 'package:json_annotation/json_annotation.dart';
+
+part '${FEATURE}_model.g.dart';
+
+@JsonSerializable(explicitToJson: true)
 class ${CLASS}Model {
   final String id;
   final String name;
-  final ${CLASS}Status status;
+  final String status;
+  @JsonKey(name: 'createdAt')
   final DateTime createdAt;
 
   const ${CLASS}Model({
@@ -2325,44 +2727,10 @@ class ${CLASS}Model {
     required this.createdAt,
   });
 
-  factory ${CLASS}Model.fromJson(Map<String, dynamic> json) {
-    return ${CLASS}Model(
-      id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? '',
-      status: ${CLASS}Status.fromString(json['status'] as String? ?? ''),
-      createdAt:
-          DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
-    );
-  }
+  factory ${CLASS}Model.fromJson(Map<String, dynamic> json) =>
+      _\$${CLASS}ModelFromJson(json);
 
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'status': status.value,
-    'createdAt': createdAt.toIso8601String(),
-  };
-}
-
-enum ${CLASS}Status {
-  active,
-  inactive,
-  unknown;
-
-  String get value {
-    switch (this) {
-      case ${CLASS}Status.active: return 'active';
-      case ${CLASS}Status.inactive: return 'inactive';
-      case ${CLASS}Status.unknown: return 'unknown';
-    }
-  }
-
-  static ${CLASS}Status fromString(String value) {
-    switch (value.toLowerCase()) {
-      case 'active': return ${CLASS}Status.active;
-      case 'inactive': return ${CLASS}Status.inactive;
-      default: return ${CLASS}Status.unknown;
-    }
-  }
+  Map<String, dynamic> toJson() => _\$${CLASS}ModelToJson(this);
 }
 EOF
 
@@ -2601,6 +2969,7 @@ echo -e "\n${GREEN}✔ Feature '$FEATURE' created at $DEST${NC}"
 echo -e "${YELLOW}  Next steps:${NC}"
 echo "  1. Register in main.dart:    ChangeNotifierProvider(create: (_) => ${CLASS}Provider())"
 echo "  2. Add route in app_routes.dart:  GoRoute(path: '/${FEATURE}', builder: (_, __) => const ${CLASS}Screen())"
+echo "  3. Run codegen:              dart run build_runner build --delete-conflicting-outputs"
 echo ""
 NEWFEATURE
 
@@ -2642,6 +3011,29 @@ else
   print_success "Dependencies installed"
 fi
 
+# ── CODE GENERATION (build_runner + flutter_gen) ─────────────
+print_step "Running build_runner (json_serializable + flutter_gen)"
+dart run build_runner build --delete-conflicting-outputs 2>&1
+if [ $? -eq 0 ]; then
+  print_success "Code generation complete (*.g.dart + lib/gen/)"
+else
+  print_warn "build_runner had issues. Run manually: dart run build_runner build --delete-conflicting-outputs"
+fi
+
+# ── APP ICON GENERATION ───────────────────────────────────────
+print_step "Generating app icons (flutter_launcher_icons)"
+if [ -f "assets/images/app_icon.png" ]; then
+  dart run flutter_launcher_icons 2>&1
+  if [ $? -eq 0 ]; then
+    print_success "App icons generated"
+  else
+    print_warn "flutter_launcher_icons had issues. Run manually after adding assets/images/app_icon.png"
+  fi
+else
+  print_warn "No app_icon.png found at assets/images/ — skipping icon generation."
+  print_warn "Add a 1024×1024 PNG as assets/images/app_icon.png, then run: dart run flutter_launcher_icons"
+fi
+
 # ── FLUTTER ANALYZE ───────────────────────────────────────────
 print_step "Running flutter analyze"
 flutter analyze --no-pub 2>&1
@@ -2674,10 +3066,21 @@ echo "  ✔ Splash → Login/Register → Home flow"
 echo "  ✔ LoginScreen: BrandingSide + AuthSide (split into own files)"
 echo "  ✔ AuthTransition animation + RegisterForm"
 echo "  ✔ main.dart wired up"
+echo "  ✔ ConnectivityService + OfflineBanner (auto-shown on every screen)"
+echo "  ✔ Android permissions (INTERNET, CAMERA, READ_MEDIA_IMAGES)"
+echo "  ✔ iOS Info.plist usage descriptions (camera, photo library)"
+echo "  ✔ macOS entitlements (network.client + network.server for sandbox)"
+echo "  ✔ json_serializable + build_runner (*.g.dart code generation)"
+echo "  ✔ UserModel (@JsonSerializable) — used by AuthMainProvider + StorageService"
+echo "  ✔ flutter_gen (lib/gen/ typed asset references)"
+echo "  ✔ flutter_launcher_icons config (add app_icon.png to run)"
+echo "  ✔ Test scaffold (test/core/ + test/screens/login/)"
 echo ""
 echo -e "  ${BOLD}Next steps:${NC}"
 echo "  1. Update lib/core/global_variables/global_variables.dart (apiKey)"
 echo "  2. Update lib/screens/login/services/auth_api_service.dart (your endpoint)"
-echo "  3. Run: ./new_feature.sh <name>   to scaffold any new feature"
-echo "  4. Run: flutter run"
+echo "  3. Add assets/images/app_icon.png (1024×1024), then: dart run flutter_launcher_icons"
+echo "  4. Run: ./new_feature.sh <name>   to scaffold any new feature"
+echo "  5. After adding new features: dart run build_runner build --delete-conflicting-outputs"
+echo "  6. Run: flutter run"
 echo ""
