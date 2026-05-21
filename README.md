@@ -41,6 +41,39 @@ A second script, `new_feature.sh`, is generated inside every project and scaffol
 | Bash | 3.2+ (macOS default works) |
 | Python 3 | Any version (for the import fixer and platform patchers) |
 
+### Platform Compatibility
+
+| Platform | Supported | Notes |
+| -------- | --------- | ----- |
+| macOS | ✅ Native | Works out of the box |
+| Linux | ✅ Native | Works out of the box |
+| Windows | ⚠️ Needs setup | Requires WSL 2, Git Bash, or Cygwin (see below) |
+
+### Windows Setup
+
+The script is Bash — Windows has no Bash shell by default. The generated Flutter project works perfectly on Windows; it's only the generator script that needs a Bash environment to run.
+
+**Option 1 — WSL 2 (recommended)**
+
+Install WSL 2 with Ubuntu from the Microsoft Store, then run everything inside the Ubuntu terminal:
+
+```bash
+chmod +x create_flutter_app.sh
+./create_flutter_app.sh
+```
+
+Full Linux compatibility — the most reliable option.
+
+**Option 2 — Git Bash**
+
+Ships with [Git for Windows](https://git-scm.com/download/win). Works for most of the script but requires Python 3 to be installed separately and available in your PATH.
+
+**Option 3 — Cygwin**
+
+Full POSIX layer for Windows. Works but is heavier to install than the other two options.
+
+> **Tip:** After generating the project in WSL 2 or Git Bash, you can open and develop it normally in VS Code or Android Studio on Windows.
+
 ---
 
 ## Usage
