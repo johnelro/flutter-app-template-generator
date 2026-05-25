@@ -272,7 +272,7 @@ dependencies:
   skeletonizer: ^1.4.3
 
   # Serialization
-  json_annotation: ^4.9.0
+  json_annotation: ^4.12.0
 
 dev_dependencies:
   flutter_test:
@@ -2966,10 +2966,19 @@ PYEOF
 fi
 
 echo -e "\n${GREEN}✔ Feature '$FEATURE' created at $DEST${NC}"
+
+# ── Auto-run code generation ──────────────────────────────────
+echo -e "\n${BLUE}${BOLD}▶ Running build_runner...${NC}"
+dart run build_runner build
+if [ $? -eq 0 ]; then
+  echo -e "  ${GREEN}✔ Code generation complete (${FEATURE}_model.g.dart generated)${NC}"
+else
+  echo -e "  ${YELLOW}⚠ build_runner had issues. Run manually: dart run build_runner build${NC}"
+fi
+
 echo -e "${YELLOW}  Next steps:${NC}"
 echo "  1. Register in main.dart:    ChangeNotifierProvider(create: (_) => ${CLASS}Provider())"
 echo "  2. Add route in app_routes.dart:  GoRoute(path: '/${FEATURE}', builder: (_, __) => const ${CLASS}Screen())"
-echo "  3. Run codegen:              dart run build_runner build --delete-conflicting-outputs"
 echo ""
 NEWFEATURE
 
@@ -3013,11 +3022,11 @@ fi
 
 # ── CODE GENERATION (build_runner + flutter_gen) ─────────────
 print_step "Running build_runner (json_serializable + flutter_gen)"
-dart run build_runner build --delete-conflicting-outputs 2>&1
+dart run build_runner build 2>&1
 if [ $? -eq 0 ]; then
   print_success "Code generation complete (*.g.dart + lib/gen/)"
 else
-  print_warn "build_runner had issues. Run manually: dart run build_runner build --delete-conflicting-outputs"
+  print_warn "build_runner had issues. Run manually: dart run build_runner build"
 fi
 
 # ── APP ICON GENERATION ───────────────────────────────────────
@@ -3080,7 +3089,6 @@ echo -e "  ${BOLD}Next steps:${NC}"
 echo "  1. Update lib/core/global_variables/global_variables.dart (apiKey)"
 echo "  2. Update lib/screens/login/services/auth_api_service.dart (your endpoint)"
 echo "  3. Add assets/images/app_icon.png (1024×1024), then: dart run flutter_launcher_icons"
-echo "  4. Run: ./new_feature.sh <name>   to scaffold any new feature"
-echo "  5. After adding new features: dart run build_runner build --delete-conflicting-outputs"
+echo "  4. Run: ./new_feature.sh <name>   to scaffold any new feature (build_runner runs automatically)"
 echo "  6. Run: flutter run"
 echo ""

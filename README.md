@@ -140,18 +140,19 @@ The project uses `build_runner` to generate two things automatically:
 
 **One-shot** (CI, after `git pull`, before release):
 ```bash
-dart run build_runner build --delete-conflicting-outputs
+dart run build_runner build
 ```
 
 **Watch mode** (while coding — reruns on every save):
 ```bash
-dart run build_runner watch --delete-conflicting-outputs
+dart run build_runner watch
 ```
 
 Run `build_runner` after:
-- Running `./new_feature.sh` to generate the model's `.g.dart`
 - Adding any image or file to `assets/`
 - Changing any field in an existing `@JsonSerializable` model
+
+> **Note:** Running `./new_feature.sh` now triggers `build_runner` automatically — no manual step needed for new features.
 
 ---
 
@@ -186,7 +187,9 @@ lib/screens/products/
 └── products_screen.dart               ← placeholder screen
 ```
 
-Then follow the three printed next steps:
+Code generation runs **automatically** right after scaffolding — `new_feature.sh` calls `dart run build_runner build` for you, so the model's `.g.dart` is ready immediately.
+
+Then follow the two printed next steps:
 
 ```dart
 // 1. Register provider in lib/main.dart
@@ -197,11 +200,6 @@ GoRoute(
   path: '/products',
   builder: (_, __) => const ProductsScreen(),
 ),
-```
-
-```bash
-# 3. Generate the model's .g.dart
-dart run build_runner build --delete-conflicting-outputs
 ```
 
 ---
@@ -223,7 +221,7 @@ dart run build_runner build --delete-conflicting-outputs
 | `intl` | ^0.20.2 | Internationalisation |
 | `connectivity_plus` | ^7.0.0 | Network status |
 | `url_launcher` | ^6.3.2 | URL / deep link handling |
-| `json_annotation` | ^4.9.0 | Model serialization annotations |
+| `json_annotation` | ^4.12.0 | Model serialization annotations |
 | `flutter_lints` | ^5.0.0 | Lint rules (dev) |
 | `flutter_launcher_icons` | ^0.14.4 | App icon generation (dev) |
 | `build_runner` | ^2.4.14 | Code generation runner (dev) |
@@ -318,7 +316,7 @@ class ProductModel {
 
 After any model change, regenerate:
 ```bash
-dart run build_runner build --delete-conflicting-outputs
+dart run build_runner build
 ```
 
 ### Assets — `flutter_gen`
@@ -485,7 +483,7 @@ Still to do manually:
 - [ ] Update `/auth/login` and `/auth/register` endpoints in `auth_api_service.dart`
 - [ ] Replace placeholder hex colors in `app_theme.dart` with your brand palette
 - [ ] Add `assets/images/app_icon.png` (1024×1024), then run `dart run flutter_launcher_icons`
-- [ ] Run `dart run build_runner build --delete-conflicting-outputs` after first clone
+- [ ] Run `dart run build_runner build` after first clone
 
 ---
 
