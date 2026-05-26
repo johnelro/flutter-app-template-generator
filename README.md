@@ -6,12 +6,13 @@ A single shell script that scaffolds a production-ready Flutter project in under
 
 ## What It Does
 
-Running `create_flutter_app.sh` interactively asks four questions, then generates a complete project:
+Running `create_flutter_app.sh` interactively asks five questions, then generates a complete project:
 
 - Full clean-architecture folder structure
 - All core services pre-written (`ApiClient`, `StorageService`, `ConnectivityService`, `api_exceptions`)
 - `AppTheme` with design tokens (colors, typography, spacing, radii)
-- `ResponsiveHelper` — full responsive API for mobile / tablet / iPad / desktop
+- `ResponsiveHelper` — full responsive API for mobile / tablet / iPad / desktop (see [ResponsiveHelper](#responsivehelper) below)
+- **Home screen layout choice** — plain single screen *or* floating bottom nav bar with 2–5 tab screens (see [Home Screen Layout](#home-screen-layout) below)
 - `GoRouter` with `AuthRouteNotifier` and auth-aware redirect
 - `AuthMainProvider` with `checkAuthStatus` / `signIn` / `register` / `signOut`
 - `UserModel` with `@JsonSerializable` — wired into `AuthMainProvider` and `StorageService`
@@ -102,9 +103,12 @@ You will be prompted for:
 | Prompt | Example |
 | ------ | ------- |
 | Project name (snake_case) | `my_app` |
-| Organization | `com.yourcompany` |
+| Organisation | `com.yourcompany` |
 | Base API URL | `https://api.yourcompany.com` |
 | App display title | `My App` (defaults to title-cased project name) |
+| Home screen layout | `1` Plain screen · `2` Bottom nav with tabs |
+
+When you choose **Bottom nav**, you are also asked for the number of tab screens (2–5).
 
 The script then creates `my_app/`, installs dependencies, runs code generation, patches platform files, and runs `flutter analyze`.
 
@@ -256,7 +260,21 @@ lib/
 │   │   ├── providers/auth_main_provider.dart
 │   │   ├── services/auth_api_service.dart
 │   │   └── login_screen.dart
-│   ├── home/home_screen.dart
+│   ├── home/                          # Layout depends on choice made during setup:
+│   │   │
+│   │   │  ── Plain screen layout ──────────────────────────────────
+│   │   └── home_screen.dart           # Simple AppBar + body
+│   │
+│   │      ── Bottom nav layout ────────────────────────────────────
+│   │   ├── home_screen.dart           # MainScreen shell (tab state, Scaffold)
+│   │   ├── widgets/
+│   │   │   ├── header.dart            # App title (left) + settings icon (right)
+│   │   │   └── floating_nav_bar.dart  # Animated floating pill nav bar
+│   │   └── screens/
+│   │       ├── screen1/screen1_screen.dart
+│   │       ├── screen2/screen2_screen.dart
+│   │       └── ...                    # One folder per tab (2–5)
+│   │
 │   ├── settings/settings_screen.dart
 │   └── [feature]/                     # Each feature is self-contained
 │       ├── models/                    # @JsonSerializable model + .g.dart
@@ -339,6 +357,39 @@ Image.asset(Assets.images.logo.path)
 final isOnline = context.read<ConnectivityService>().isOnline;
 ```
 
+### Home Screen Layout
+
+The script offers two layouts during setup:
+
+**Option 1 — Plain screen** (default)
+
+A simple `Scaffold` with an `AppBar` and a body. Good for apps where the home screen is a single destination.
+
+```
+lib/screens/home/
+└── home_screen.dart   ← AppBar + body placeholder
+```
+
+**Option 2 — Bottom nav with floating nav bar**
+
+A `MainScreen` shell that hosts 2–5 tab screens behind a floating pill-style navigation bar. The number of tabs is chosen during setup.
+
+```
+lib/screens/home/
+├── home_screen.dart              ← MainScreen shell (tab state, Scaffold)
+├── widgets/
+│   ├── header.dart               ← shared app-title / settings header
+│   └── floating_nav_bar.dart     ← animated floating pill nav bar
+└── screens/
+    ├── screen1/screen1_screen.dart
+    ├── screen2/screen2_screen.dart
+    └── ...                       ← one folder per tab (up to 5)
+```
+
+The `FloatingNavBar` auto-generates icon pairs (filled/outlined) and labels for each tab. Switch to it at any time by re-running the generator for a new project — or manually drop in `floating_nav_bar.dart` and the tab screen folder structure.
+
+---
+
 ### ResponsiveHelper
 
 Every screen reads device type and sizes from `ResponsiveHelper`:
@@ -361,11 +412,33 @@ Widget build(BuildContext context) {
 }
 ```
 
-Device detection: `isMobile` · `isTablet` · `isIPad` · `isDesktop` · `isAnyTablet`
+#### Device detection
 
-Spacing getters: `spacingXS` `spacingS` `spacingM` `spacingL` `spacingXL` `spacingXXL`
+| Getter | True when |
+| ------ | --------- |
+| `isMobile` | width < 600 px |
+| `isTablet` | width 600–1199 px, not an iPad (Android / Windows tablets) |
+| `isIPad` | physical device, `shortestSide` ≥ 600 px, width < 1200 px — covers **all** iPad models including iPad 13" (~1024 px shortest side) |
+| `isDesktop` | width ≥ 1200 px |
+| `isAnyTablet` | `isIPad \|\| isTablet` |
 
-Text style getters: `headlineLarge` · `headlineMedium` · `titleLarge` · `titleMedium` · `bodyLarge` · `bodyMedium` · `bodySmall` · `labelSmall`
+> **Note on iPad M3 13":** earlier versions capped `isIPad` at `shortestSide < 900`, which caused the 13-inch model to fall through to `isTablet`. The cap has been removed — any physical device with `shortestSide ≥ 600` is treated as iPad. Flutter Web bypasses the heuristic entirely (browser viewports are not physical devices).
+
+#### Scale factors
+
+| Device | `sp()` multiplier |
+| ------ | ---------------- |
+| Small mobile (< 350 px) | 0.85× |
+| Mobile | 1.0× |
+| Tablet | 1.1× |
+| iPad | 1.15× |
+| Desktop / Web | 1.05× |
+
+The desktop factor was reduced from the previous 1.3× to 1.05× to prevent font and icon sizes from ballooning on wide browser viewports.
+
+#### Spacing getters: `spacingXS` `spacingS` `spacingM` `spacingL` `spacingXL` `spacingXXL`
+
+#### Text style getters: `headlineLarge` · `headlineMedium` · `titleLarge` · `titleMedium` · `bodyLarge` · `bodyMedium` · `bodySmall` · `labelSmall`
 
 For custom dimensions, add a private `_get*()` method with 4 branches:
 
@@ -373,8 +446,8 @@ For custom dimensions, add a private `_get*()` method with 4 branches:
 double _getCardPadding(ResponsiveHelper r) {
   if (r.isMobile) return 12.0;
   if (r.isTablet) return 14.0;
-  if (r.isIPad) return 15.0;
-  return 16.0;   // desktop
+  if (r.isIPad)   return 15.0;
+  return 16.0;   // desktop / web
 }
 ```
 
@@ -468,6 +541,7 @@ After running the script, the following are already done:
 - [x] `AuthMainProvider` + `AuthRouteNotifier`
 - [x] `main.dart` wired
 - [x] GoRouter configured
+- [x] **Home screen layout** — plain screen or floating bottom nav (chosen during setup)
 - [x] Android permissions injected
 - [x] iOS `Info.plist` usage descriptions injected
 - [x] macOS entitlements patched

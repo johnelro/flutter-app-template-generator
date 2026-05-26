@@ -77,6 +77,32 @@ APP_TITLE="${TITLE_INPUT:-$TITLE_DEFAULT}"
 # e.g. my_cool_app → MyCoolApp
 CLASS_PREFIX=$(echo "$PROJECT_NAME" | awk -F_ '{r=""; for(i=1;i<=NF;i++) r=r toupper(substr($i,1,1)) substr($i,2); print r}')
 
+# ── Home screen layout choice ────────────────────────────────
+echo -e "\n  ${BOLD}Home screen layout:${NC}"
+echo "    1) Plain screen  — simple AppBar + body (current default)"
+echo "    2) Bottom nav    — main shell with floating nav bar + multiple tab screens"
+echo -en "  Choose [1/2] (default: 1): "
+read LAYOUT_CHOICE
+LAYOUT_CHOICE="${LAYOUT_CHOICE:-1}"
+
+HOME_LAYOUT="plain"
+TAB_COUNT=0
+if [[ "$LAYOUT_CHOICE" == "2" ]]; then
+  HOME_LAYOUT="tabnav"
+  while true; do
+    echo -en "  ${BOLD}Number of tab screens${NC} (2–5): "
+    read TAB_COUNT_INPUT
+    if [[ "$TAB_COUNT_INPUT" =~ ^[2-5]$ ]]; then
+      TAB_COUNT=$TAB_COUNT_INPUT
+      break
+    fi
+    print_error "Please enter a number between 2 and 5."
+  done
+  echo -e "  ${CYAN}Layout:${NC}  Bottom nav with $TAB_COUNT tab screens"
+else
+  echo -e "  ${CYAN}Layout:${NC}  Plain home screen"
+fi
+
 echo -e "\n  ${CYAN}Creating:${NC} $ORG_NAME.$PROJECT_NAME"
 echo -e "  ${CYAN}API URL:${NC}  $BASE_URL"
 echo -e "  ${CYAN}Title:${NC}    $APP_TITLE"
@@ -224,6 +250,17 @@ dirs=(
 for d in "${dirs[@]}"; do
   mkdir -p "$d"
 done
+
+# Extra folders for bottom-nav tab layout
+if [[ "$HOME_LAYOUT" == "tabnav" ]]; then
+  mkdir -p "lib/screens/home/widgets"
+  for i in $(seq 1 "$TAB_COUNT"); do
+    mkdir -p "lib/screens/home/screens/screen${i}/models"
+    mkdir -p "lib/screens/home/screens/screen${i}/providers"
+    mkdir -p "lib/screens/home/screens/screen${i}/services"
+    mkdir -p "lib/screens/home/screens/screen${i}/widgets"
+  done
+fi
 print_success "Directories created"
 
 # ── pubspec.yaml ─────────────────────────────────────────────
@@ -917,25 +954,43 @@ class ResponsiveHelper {
   }
 
   // ── Breakpoints ──────────────────────────────────────────────
-  static const double _mobileMax = 600;
+  static const double _mobileMax  = 600;
   static const double _desktopMin = 1200;
 
   // ── Device detection ─────────────────────────────────────────
   bool get isSmallMobile => _screenWidth < 350;
-  bool get isMobile => _screenWidth < _mobileMax;
+  bool get isMobile      => _screenWidth < _mobileMax;
+
+  /// True for any iPad — including large models like the 13-inch iPad M3
+  /// whose shortestSide is ~1024 px (larger than the old 900-cap).
+  /// Detection rule: physical device (non-web), shortestSide ≥ 600 px,
+  /// and screen is NOT in true desktop territory (width < desktopMin).
+  bool get isIPad {
+    // On Flutter Web every platform reports the browser viewport, not a
+    // physical device — skip the iPad heuristic there.
+    if (_isWeb) return false;
+    final shortest = _mediaQuery.size.shortestSide;
+    // ≥ 600 covers all iPads (mini → 13-inch Pro/M3).
+    // < _desktopMin keeps a MacBook/external-monitor from matching.
+    return shortest >= 600 && _screenWidth < _desktopMin;
+  }
+
+  /// Generic Android/Windows tablet: landscape width in [600, 1200),
+  /// but NOT an iPad.
   bool get isTablet =>
       _screenWidth >= _mobileMax &&
       _screenWidth < _desktopMin &&
       !isIPad;
 
-  /// iPad detected by shortestSide (physical device heuristic).
-  bool get isIPad {
-    final shortest = _mediaQuery.size.shortestSide;
-    return shortest >= 600 && shortest < 900 && _screenWidth < _desktopMin;
-  }
+  bool get isDesktop    => _screenWidth >= _desktopMin;
+  bool get isAnyTablet  => isIPad || isTablet;
 
-  bool get isDesktop => _screenWidth >= _desktopMin;
-  bool get isAnyTablet => isIPad || isTablet;
+  /// True when running on Flutter Web (used to skip native device heuristics).
+  bool get _isWeb {
+    // identical(0, 0.0) is false on the VM, true on dart2js/DDC (web).
+    // ignore: unnecessary_type_check
+    return identical(0, 0.0);
+  }
 
   // ── Raw dimensions ────────────────────────────────────────────
   double get screenWidth => _screenWidth;
@@ -951,10 +1006,13 @@ class ResponsiveHelper {
   double sp(double size) => size * _scaleFactor;
   double get _scaleFactor {
     if (isSmallMobile) return 0.85;
-    if (isMobile) return 1.0;
-    if (isTablet) return 1.15;
-    if (isIPad) return 1.2;
-    return 1.3; // desktop
+    if (isMobile)      return 1.0;
+    if (isTablet)      return 1.1;
+    if (isIPad)        return 1.15;
+    // Desktop / web browser: keep sizes close to mobile baseline so text
+    // doesn't balloon on wide viewports. 1.05 gives a subtle size bump
+    // without the oversized look of the old 1.3 factor.
+    return 1.05;
   }
 
   // ── Spacing (height-relative — use these first) ───────────────
@@ -967,10 +1025,12 @@ class ResponsiveHelper {
 
   // ── Common layout getters ─────────────────────────────────────
   EdgeInsets get defaultPadding {
-    if (isMobile) return EdgeInsets.symmetric(horizontal: wp(4), vertical: hp(2));
-    if (isTablet) return EdgeInsets.symmetric(horizontal: wp(5), vertical: hp(2.5));
-    if (isIPad) return EdgeInsets.symmetric(horizontal: wp(6), vertical: hp(3));
-    return EdgeInsets.symmetric(horizontal: wp(8), vertical: hp(4));
+    if (isMobile) return EdgeInsets.symmetric(horizontal: wp(4),  vertical: hp(2));
+    if (isTablet) return EdgeInsets.symmetric(horizontal: wp(5),  vertical: hp(2.5));
+    if (isIPad)   return EdgeInsets.symmetric(horizontal: wp(4),  vertical: hp(2.5));
+    // Desktop/web: use a fixed max rather than a % so wide screens don't
+    // get enormous gutters. Content is also constrained by maxFormWidth.
+    return const EdgeInsets.symmetric(horizontal: 24, vertical: 24);
   }
 
   EdgeInsets get inputContentPadding {
@@ -1012,10 +1072,10 @@ class ResponsiveHelper {
   }
 
   double get defaultIconSize {
-    if (isMobile) return sp(24);
-    if (isTablet) return sp(26);
-    if (isIPad) return sp(28);
-    return sp(32);
+    if (isMobile)  return sp(24);
+    if (isTablet)  return sp(24);
+    if (isIPad)    return sp(26);
+    return sp(24); // desktop/web — same as mobile baseline, scale factor handles the rest
   }
 
   int get gridColumns {
@@ -1411,6 +1471,68 @@ class AuthRouteNotifier extends ValueNotifier<bool> {
 }
 AUTHNOTIFIER
 
+if [[ "$HOME_LAYOUT" == "tabnav" ]]; then
+cat > lib/routes/app_routes.dart << 'APPROUTES'
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../screens/login/providers/auth_main_provider.dart';
+import '../screens/splash/splash_screen.dart';
+import '../screens/login/login_screen.dart';
+import '../screens/home/home_screen.dart';
+import '../screens/settings/settings_screen.dart';
+import 'auth_route_notifier.dart';
+
+GoRouter createAppRouter(AuthMainProvider authProvider) {
+  final authRouteNotifier = AuthRouteNotifier(authProvider);
+
+  return GoRouter(
+    initialLocation: '/splash',
+    refreshListenable: authRouteNotifier,
+    redirect: (BuildContext context, GoRouterState state) {
+      final isAuthenticated = authProvider.isAuthenticated;
+      final isLoading =
+          authProvider.status == AuthStatus.initial ||
+          authProvider.status == AuthStatus.loading;
+
+      if (state.uri.path == '/splash') return null;
+
+      if (kDebugMode && isLoading) {
+        debugPrint(
+            '[app_routes] skipping redirect during loading: ${state.uri.path}');
+        return null;
+      }
+
+      final isLoginRoute = state.uri.path == '/login';
+
+      if (!isAuthenticated && !isLoginRoute) return '/login';
+      if (isAuthenticated && isLoginRoute) return '/home';
+
+      return null;
+    },
+    routes: [
+      GoRoute(
+        path: '/splash',
+        builder: (context, state) => const SplashScreen(),
+      ),
+      GoRoute(
+        path: '/login',
+        builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        // MainScreen is the tab-nav shell, exported as home_screen.dart
+        path: '/home',
+        builder: (context, state) => const MainScreen(),
+      ),
+      GoRoute(
+        path: '/settings',
+        builder: (context, state) => const SettingsScreen(),
+      ),
+    ],
+  );
+}
+APPROUTES
+else
 cat > lib/routes/app_routes.dart << 'APPROUTES'
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -1470,6 +1592,7 @@ GoRouter createAppRouter(AuthMainProvider authProvider) {
   );
 }
 APPROUTES
+fi
 
 print_success "Routing files written"
 
@@ -2271,6 +2394,9 @@ class _LoginScreenState extends State<LoginScreen>
 }
 LOGINSCREEN
 
+# ── HOME SCREEN(S) — conditional on layout choice ─────────────
+if [[ "$HOME_LAYOUT" == "plain" ]]; then
+
 # home/widgets/home_body.dart
 cat > lib/screens/home/widgets/home_body.dart << HOMEBODY
 import 'package:flutter/material.dart';
@@ -2390,6 +2516,538 @@ class HomeScreen extends StatelessWidget {
 }
 HOMESCREEN
 
+else
+# ── BOTTOM NAV LAYOUT ─────────────────────────────────────────
+
+# Build tab screen names array (screen1, screen2, ...)
+TAB_NAMES=()
+TAB_CLASSES=()
+for i in $(seq 1 "$TAB_COUNT"); do
+  TAB_NAMES+=("screen${i}")
+  TAB_CLASSES+=("Screen${i}")
+done
+
+# 1) floating_nav_bar.dart widget
+#    Key design rules matching the reference project:
+#    - Outer container: dark pill (grey900), shadow, shrink-wraps via mainAxisSize.min + Center
+#    - Unselected: icon only, grey400 colour
+#    - Selected: icon + label, white text/icon, AppTheme.primary pill highlight
+#    - Container does NOT stretch full width — it hugs content
+cat > lib/screens/home/widgets/floating_nav_bar.dart << FLOATNAV
+import 'package:flutter/material.dart';
+import 'package:${PROJECT_NAME}/theme/app_theme.dart';
+import 'package:${PROJECT_NAME}/utils/responsive_helper.dart';
+
+class FloatingNavBar extends StatelessWidget {
+  final int currentIndex;
+  final ValueChanged<int> onTabChanged;
+  final ResponsiveHelper responsive;
+
+  const FloatingNavBar({
+    super.key,
+    required this.currentIndex,
+    required this.onTabChanged,
+    required this.responsive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Center + intrinsicWidth so the pill hugs its content regardless of
+    // how wide the Positioned left/right anchor is.
+    return Center(
+      child: IntrinsicWidth(
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.grey900,
+            borderRadius: BorderRadius.circular(40),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 20,
+                spreadRadius: 0,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          padding: EdgeInsets.symmetric(
+            horizontal: _getOuterPaddingH(responsive),
+            vertical: _getOuterPaddingV(responsive),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List.generate(_tabs.length, (index) {
+              final selected = index == currentIndex;
+              return Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: _getTabGap(responsive),
+                ),
+                child: GestureDetector(
+                  onTap: () => onTabChanged(index),
+                  behavior: HitTestBehavior.opaque,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeInOut,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: selected
+                          ? _getSelectedPaddingH(responsive)
+                          : _getUnselectedPaddingH(responsive),
+                      vertical: _getPillPaddingV(responsive),
+                    ),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? AppTheme.primary
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          selected
+                              ? _tabs[index].activeIcon
+                              : _tabs[index].icon,
+                          size: _getIconSize(responsive),
+                          color: selected
+                              ? Colors.white
+                              : AppTheme.grey400,
+                        ),
+                        if (selected) ...[
+                          SizedBox(width: _getLabelGap(responsive)),
+                          Text(
+                            _tabs[index].label,
+                            style: TextStyle(
+                              fontSize: _getLabelSize(responsive),
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                              letterSpacing: 0.1,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Tab definitions ────────────────────────────────────────
+  static const _tabs = [
+FLOATNAV
+
+# Append tab entries with filled/outlined icon pairs
+for i in $(seq 1 "$TAB_COUNT"); do
+  case $i in
+    1) ICON="Icons.home_outlined"          ACTIVE="Icons.home_rounded"               LABEL="Screen 1" ;;
+    2) ICON="Icons.search_outlined"        ACTIVE="Icons.search_rounded"             LABEL="Screen 2" ;;
+    3) ICON="Icons.add_circle_outline"     ACTIVE="Icons.add_circle"                 LABEL="Screen 3" ;;
+    4) ICON="Icons.notifications_outlined" ACTIVE="Icons.notifications_rounded"      LABEL="Screen 4" ;;
+    5) ICON="Icons.person_outline"         ACTIVE="Icons.person_rounded"             LABEL="Screen 5" ;;
+  esac
+cat >> lib/screens/home/widgets/floating_nav_bar.dart << TABENTRY
+    _NavTab(icon: $ICON, activeIcon: $ACTIVE, label: '$LABEL'),
+TABENTRY
+done
+
+cat >> lib/screens/home/widgets/floating_nav_bar.dart << FLOATNAV2
+  ];
+
+  // ── Responsive sizing ──────────────────────────────────────
+
+  /// Outer container horizontal padding (left/right of the whole pill group)
+  double _getOuterPaddingH(ResponsiveHelper r) {
+    if (r.isMobile) return 6.0;
+    if (r.isTablet) return 8.0;
+    if (r.isIPad) return 10.0;
+    return 12.0;
+  }
+
+  /// Outer container vertical padding (top/bottom of the whole pill group)
+  double _getOuterPaddingV(ResponsiveHelper r) {
+    if (r.isMobile) return 6.0;
+    if (r.isTablet) return 7.0;
+    if (r.isIPad) return 8.0;
+    return 9.0;
+  }
+
+  /// Horizontal gap between each tab item
+  double _getTabGap(ResponsiveHelper r) {
+    if (r.isMobile) return 2.0;
+    if (r.isTablet) return 3.0;
+    if (r.isIPad) return 4.0;
+    return 4.0;
+  }
+
+  /// Horizontal padding inside the selected (icon + label) pill
+  double _getSelectedPaddingH(ResponsiveHelper r) {
+    if (r.isMobile) return 16.0;
+    if (r.isTablet) return 18.0;
+    if (r.isIPad) return 20.0;
+    return 22.0;
+  }
+
+  /// Horizontal padding around the unselected icon
+  double _getUnselectedPaddingH(ResponsiveHelper r) {
+    if (r.isMobile) return 12.0;
+    if (r.isTablet) return 13.0;
+    if (r.isIPad) return 14.0;
+    return 15.0;
+  }
+
+  /// Vertical padding inside each tab pill (selected and unselected)
+  double _getPillPaddingV(ResponsiveHelper r) {
+    if (r.isMobile) return 10.0;
+    if (r.isTablet) return 11.0;
+    if (r.isIPad) return 12.0;
+    return 13.0;
+  }
+
+  double _getIconSize(ResponsiveHelper r) {
+    if (r.isMobile) return r.sp(22);
+    if (r.isTablet) return r.sp(23);
+    if (r.isIPad) return r.sp(24);
+    return r.sp(25);
+  }
+
+  /// Gap between icon and label inside selected tab
+  double _getLabelGap(ResponsiveHelper r) {
+    if (r.isMobile) return 7.0;
+    if (r.isTablet) return 8.0;
+    if (r.isIPad) return 9.0;
+    return 10.0;
+  }
+
+  double _getLabelSize(ResponsiveHelper r) {
+    if (r.isMobile) return r.sp(13);
+    if (r.isTablet) return r.sp(14);
+    if (r.isIPad) return r.sp(14);
+    return r.sp(15);
+  }
+}
+
+class _NavTab {
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  const _NavTab({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+  });
+}
+FLOATNAV2
+
+# 2) Generate each tab screen file
+for i in $(seq 1 "$TAB_COUNT"); do
+  SNAME="screen${i}"
+  SCLASS="Screen${i}Screen"
+
+cat > "lib/screens/home/screens/${SNAME}/${SNAME}_screen.dart" << TABSCREEN
+import 'package:flutter/material.dart';
+import 'package:${PROJECT_NAME}/theme/app_theme.dart';
+import 'package:${PROJECT_NAME}/utils/responsive_helper.dart';
+
+/// Screen $i tab content — rendered inside MainScreen.
+/// Add your models, providers, services, and widgets here.
+class $SCLASS extends StatelessWidget {
+  const $SCLASS({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final responsive = ResponsiveHelper(context);
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: _getMaxWidth(responsive)),
+        child: Padding(
+          padding: responsive.defaultPadding,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.construction_outlined,
+                size: responsive.sp(56),
+                color: AppTheme.textTertiary,
+              ),
+              SizedBox(height: responsive.spacingM),
+              Text(
+                'Screen $i',
+                style: TextStyle(
+                  fontSize: _getTitleSize(responsive),
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              SizedBox(height: responsive.spacingS),
+              Text(
+                'Build your feature here.',
+                style: TextStyle(
+                  fontSize: _getSubtitleSize(responsive),
+                  color: AppTheme.textSecondary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  double _getTitleSize(ResponsiveHelper r) {
+    if (r.isMobile) return r.sp(18);
+    if (r.isTablet) return r.sp(20);
+    if (r.isIPad) return r.sp(20);
+    return r.sp(22);
+  }
+
+  double _getSubtitleSize(ResponsiveHelper r) {
+    if (r.isMobile) return r.sp(13);
+    if (r.isTablet) return r.sp(14);
+    if (r.isIPad) return r.sp(14);
+    return r.sp(15);
+  }
+
+  double _getMaxWidth(ResponsiveHelper r) {
+    if (r.isMobile) return double.infinity;
+    if (r.isTablet) return 560.0;
+    if (r.isIPad) return 620.0;
+    return 680.0;
+  }
+}
+TABSCREEN
+
+done
+
+# 3) Build the _buildCurrentScreen switch cases and imports dynamically
+SWITCH_CASES=""
+TAB_IMPORTS=""
+for i in $(seq 1 "$TAB_COUNT"); do
+  SNAME="screen${i}"
+  SCLASS="Screen${i}Screen"
+  TAB_IMPORTS+="import 'package:${PROJECT_NAME}/screens/home/screens/${SNAME}/${SNAME}_screen.dart';\n"
+  SWITCH_CASES+="      case $((i-1)):\n        return const $SCLASS();\n"
+done
+
+# 4) header.dart widget — app title left, settings icon right
+#    Mirrors the reference project's widgets/header.dart exactly.
+cat > lib/screens/home/widgets/header.dart << HEADERWIDGET
+import 'package:flutter/material.dart';
+import 'package:${PROJECT_NAME}/theme/app_theme.dart';
+import 'package:${PROJECT_NAME}/utils/responsive_helper.dart';
+
+/// Shared header shown across all tabs in MainScreen.
+/// Title is left-aligned; settings icon is right-aligned.
+/// The header intentionally fills its parent width — do NOT wrap
+/// it in Center/ConstrainedBox at the call-site; horizontal padding
+/// is handled by the parent Padding widget in home_screen.dart.
+class Header extends StatelessWidget {
+  final ResponsiveHelper responsive;
+  final VoidCallback onSettingsTap;
+
+  const Header({
+    super.key,
+    required this.responsive,
+    required this.onSettingsTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          '$APP_TITLE',
+          style: TextStyle(
+            fontSize: _getTitleSize(responsive),
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        IconButton(
+          icon: Icon(
+            Icons.settings_outlined,
+            size: _getIconSize(responsive),
+            color: AppTheme.textPrimary,
+          ),
+          onPressed: onSettingsTap,
+        ),
+      ],
+    );
+  }
+
+  double _getTitleSize(ResponsiveHelper r) {
+    if (r.isMobile) return r.sp(22);
+    if (r.isTablet) return r.sp(22);
+    if (r.isIPad)   return r.sp(23);
+    // Desktop / web: don't inflate beyond a comfortable reading size
+    return r.sp(22);
+  }
+
+  double _getIconSize(ResponsiveHelper r) {
+    if (r.isMobile) return r.sp(22);
+    if (r.isTablet) return r.sp(22);
+    if (r.isIPad)   return r.sp(23);
+    return r.sp(22);
+  }
+}
+HEADERWIDGET
+
+# 5) home_screen.dart — MainScreen shell, structure mirrors reference main_screen.dart
+#    Uses Header widget, same Padding/Center/ConstrainedBox/Column structure,
+#    same responsive values as the reference file.
+cat > lib/screens/home/home_screen.dart << MAINSCREEN
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:${PROJECT_NAME}/utils/responsive_helper.dart';
+import 'package:${PROJECT_NAME}/screens/home/widgets/header.dart';
+import 'package:${PROJECT_NAME}/screens/home/widgets/floating_nav_bar.dart';
+MAINSCREEN
+
+# Append per-tab screen imports
+for i in $(seq 1 "$TAB_COUNT"); do
+  SNAME="screen${i}"
+  echo "import 'package:${PROJECT_NAME}/screens/home/screens/${SNAME}/${SNAME}_screen.dart';" \
+    >> lib/screens/home/home_screen.dart
+done
+
+cat >> lib/screens/home/home_screen.dart << MAINSCREEN2
+
+/// Main screen shell with floating bottom navigation bar.
+class MainScreen extends StatefulWidget {
+  const MainScreen({super.key});
+
+  @override
+  State<MainScreen> createState() => _MainScreenState();
+}
+
+class _MainScreenState extends State<MainScreen> {
+  int _currentIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final responsive = ResponsiveHelper(context);
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      resizeToAvoidBottomInset: false,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // ── Main content area ───────────────────────────────
+            Column(
+              children: [
+                // Fixed header across all tabs
+                Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: _getHorizontalPadding(responsive),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(height: _getTopSpacing(responsive)),
+                      Header(
+                        responsive: responsive,
+                        onSettingsTap: () {
+                          context.push('/settings');
+                        },
+                      ),
+                      SizedBox(height: _getHeaderBottomSpacing(responsive)),
+                    ],
+                  ),
+                ),
+
+                // Tab content area
+                Expanded(child: _buildCurrentScreen()),
+              ],
+            ),
+
+            // ── Floating bottom navigation bar ──────────────────
+            Positioned(
+              left: _getNavBarHorizontalPadding(responsive),
+              right: _getNavBarHorizontalPadding(responsive),
+              bottom: _getNavBarBottomPadding(responsive),
+              child: FloatingNavBar(
+                currentIndex: _currentIndex,
+                onTabChanged: (index) {
+                  setState(() {
+                    _currentIndex = index;
+                  });
+                },
+                responsive: responsive,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCurrentScreen() {
+    switch (_currentIndex) {
+MAINSCREEN2
+
+# Append switch cases
+for i in $(seq 1 "$TAB_COUNT"); do
+  SCLASS="Screen${i}Screen"
+  echo "      case $((i-1)):" >> lib/screens/home/home_screen.dart
+  echo "        return const $SCLASS();" >> lib/screens/home/home_screen.dart
+done
+
+cat >> lib/screens/home/home_screen.dart << MAINSCREEN3
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  // ==========================================================================
+  // RESPONSIVE HELPER METHODS  (mirrors reference main_screen.dart exactly)
+  // ==========================================================================
+
+  double _getHorizontalPadding(ResponsiveHelper r) {
+    if (r.isMobile) return 16.0;
+    if (r.isTablet) return 20.0;
+    if (r.isIPad)   return 24.0;
+    // Desktop/web: fixed px so it doesn't scale up with viewport width
+    return 28.0;
+  }
+
+  double _getTopSpacing(ResponsiveHelper r) {
+    if (r.isMobile) return 0.0;
+    if (r.isTablet) return 20.0;
+    if (r.isIPad)   return 24.0;
+    return 24.0;
+  }
+
+  double _getHeaderBottomSpacing(ResponsiveHelper r) {
+    if (r.isMobile) return 16.0;
+    if (r.isTablet) return 20.0;
+    if (r.isIPad)   return 20.0;
+    return 20.0;
+  }
+
+  double _getNavBarHorizontalPadding(ResponsiveHelper r) {
+    if (r.isMobile) return 20.0;
+    if (r.isTablet) return 32.0;
+    if (r.isIPad) return 48.0;
+    return 64.0;
+  }
+
+  double _getNavBarBottomPadding(ResponsiveHelper r) {
+    if (r.isMobile) return 10.0;
+    if (r.isTablet) return 16.0;
+    if (r.isIPad) return 20.0;
+    return 24.0;
+  }
+}
+MAINSCREEN3
+
+fi  # end HOME_LAYOUT conditional
+
 # settings/widgets/settings_body.dart
 cat > lib/screens/settings/widgets/settings_body.dart << SETTINGSBODY
 import 'package:flutter/material.dart';
@@ -2461,12 +3119,20 @@ class SettingsScreen extends StatelessWidget {
     final responsive = ResponsiveHelper(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text('Settings', style: TextStyle(fontSize: responsive.sp(18))),
+        iconTheme: const IconThemeData(color: AppTheme.textPrimary),
+        title: Text(
+          'Settings',
+          style: TextStyle(
+            fontSize: responsive.sp(18),
+            color: AppTheme.textPrimary,
+          ),
+        ),
       ),
       body: const SettingsBody(),
     );
   }
 }
+
 SETTINGS
 
 print_success "Screens written"
@@ -3084,6 +3750,11 @@ echo "  ✔ UserModel (@JsonSerializable) — used by AuthMainProvider + Storage
 echo "  ✔ flutter_gen (lib/gen/ typed asset references)"
 echo "  ✔ flutter_launcher_icons config (add app_icon.png to run)"
 echo "  ✔ Test scaffold (test/core/ + test/screens/login/)"
+if [[ "$HOME_LAYOUT" == "tabnav" ]]; then
+echo "  ✔ MainScreen shell with floating nav bar + $TAB_COUNT tab screens (Screen 1 … Screen $TAB_COUNT)"
+else
+echo "  ✔ Plain HomeScreen (AppBar + body)"
+fi
 echo ""
 echo -e "  ${BOLD}Next steps:${NC}"
 echo "  1. Update lib/core/global_variables/global_variables.dart (apiKey)"
